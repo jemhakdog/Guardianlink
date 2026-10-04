@@ -1,0 +1,6 @@
+{
+  "name": "GuardianLink",
+  "description": "Remote parental control to manage child device volume, screen brightness, and lock states in real time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
