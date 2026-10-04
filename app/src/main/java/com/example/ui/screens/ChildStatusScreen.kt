@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HourglassBottom
@@ -368,7 +369,7 @@ fun ChildStatusScreen(
                         SettingStatusRow(
                             label = "Media Volume",
                             value = "${deviceStatus.volumeMedia}%",
-                            icon = Icons.Default.VolumeUp
+                            icon = Icons.AutoMirrored.Filled.VolumeUp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         SettingStatusRow(

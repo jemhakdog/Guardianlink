@@ -20,8 +20,8 @@ import kotlin.math.roundToInt
 
 class NativeDeviceController(private val context: Context) {
 
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private val vibrator = context.getSystemService(Vibrator::class.java)
 
     fun getBatteryInfo(): Pair<Int, Boolean> {
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)

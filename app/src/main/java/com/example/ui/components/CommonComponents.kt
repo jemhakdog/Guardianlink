@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryFull
@@ -436,7 +437,7 @@ fun VolumeControlSection(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (mediaVol == 0) Icons.Default.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            imageVector = if (mediaVol == 0) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = "Volume",
                             tint = ElectricBlue,
                             modifier = Modifier.size(20.dp)
