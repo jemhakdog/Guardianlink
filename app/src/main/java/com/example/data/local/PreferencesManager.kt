@@ -73,7 +73,7 @@ class PreferencesManager(context: Context) {
     }
 
     fun getTimeLimitMinutes(): Int {
-        return prefs.getInt("time_limit_mins", 60)
+        return prefs.getInt("time_limit_mins", 120) // Default 2 hours limit
     }
 
     fun setTimeLimitMinutes(mins: Int) {
@@ -81,7 +81,7 @@ class PreferencesManager(context: Context) {
     }
 
     fun getTimeRemainingSeconds(): Int {
-        return prefs.getInt("time_remaining_sec", 45 * 60)
+        return prefs.getInt("time_remaining_sec", 120 * 60)
     }
 
     fun setTimeRemainingSeconds(secs: Int) {
@@ -95,6 +95,21 @@ class PreferencesManager(context: Context) {
     fun setTimeLimitEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("time_limit_enabled", enabled).apply()
     }
+
+    fun isBedtimeEnabled(): Boolean = prefs.getBoolean("bedtime_enabled", false)
+    fun setBedtimeEnabled(enabled: Boolean) = prefs.edit().putBoolean("bedtime_enabled", enabled).apply()
+
+    fun getBedtimeStartHour(): Int = prefs.getInt("bedtime_start_hour", 20)
+    fun setBedtimeStartHour(h: Int) = prefs.edit().putInt("bedtime_start_hour", h).apply()
+
+    fun getBedtimeStartMinute(): Int = prefs.getInt("bedtime_start_min", 30)
+    fun setBedtimeStartMinute(m: Int) = prefs.edit().putInt("bedtime_start_min", m).apply()
+
+    fun getBedtimeEndHour(): Int = prefs.getInt("bedtime_end_hour", 7)
+    fun setBedtimeEndHour(h: Int) = prefs.edit().putInt("bedtime_end_hour", h).apply()
+
+    fun getBedtimeEndMinute(): Int = prefs.getInt("bedtime_end_min", 0)
+    fun setBedtimeEndMinute(m: Int) = prefs.edit().putInt("bedtime_end_min", m).apply()
 
     fun getConnectionMode(): String {
         return prefs.getString("connection_mode", "HYBRID") ?: "HYBRID"
@@ -113,7 +128,8 @@ class PreferencesManager(context: Context) {
     }
 
     fun getCloudRelayUrl(): String {
-        return prefs.getString("cloud_relay_url", "https://api.guardianlink.app/v1/relay") ?: "https://api.guardianlink.app/v1/relay"
+        val stored = prefs.getString("cloud_relay_url", "https://ntfy.sh") ?: "https://ntfy.sh"
+        return if (stored.contains("guardianlink.app")) "https://ntfy.sh" else stored
     }
 
     fun setCloudRelayUrl(url: String) {

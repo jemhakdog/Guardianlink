@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -21,10 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -57,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.CameraQrScanner
 import com.example.ui.components.QrCodeView
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.EmeraldSuccess
@@ -71,6 +77,7 @@ fun PairingScreen(
     BackHandler { onBack() }
 
     val pairingCode by viewModel.pairingCode.collectAsStateWithLifecycle()
+    val publicIp by viewModel.publicIp.collectAsStateWithLifecycle()
     val localIp = viewModel.getLocalIpAddress()
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Parent QR & Token, 1: Child Enter/Scan
     var manualCodeInput by remember { mutableStateOf("") }
@@ -201,20 +208,46 @@ fun PairingScreen(
                         }
                     }
                 } else {
-                    // CHILD TAB: Connects via token or scan
+                    // CHILD TAB: Connects via live camera QR scan or token
                     Text(
                         text = "Connect to Parent Controller",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Text(
-                        text = "Enter the 6-digit pairing code displayed on the parent's phone or tap simulate scan.",
+                        text = "Scan the QR code displayed on the Parent's phone or enter their 6-digit code. Works globally across different LANs and mobile data.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Real CameraX Live QR Scanner
+                    CameraQrScanner(
+                        onQrCodeScanned = { rawText ->
+                            val extractedCode = if (rawText.contains("code=")) {
+                                rawText.substringAfter("code=").take(10).uppercase()
+                            } else {
+                                rawText.trim().take(10).uppercase()
+                            }
+                            manualCodeInput = extractedCode
+                            val success = viewModel.pairWithCode(extractedCode)
+                            handshakeResult = if (success) "QR Code Scanned & Paired Successfully!" else "Pairing failed. Check code."
+                        },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "Or enter 6-digit code manually:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedTextField(
                         value = manualCodeInput,
@@ -229,7 +262,7 @@ fun PairingScreen(
                             .testTag("manual_pairing_code_input")
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Button(
                         onClick = {
@@ -245,26 +278,6 @@ fun PairingScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
                     ) {
                         Text("Connect Handshake")
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Instant Simulated Scan Button for emulator testability
-                    OutlinedButton(
-                        onClick = {
-                            manualCodeInput = pairingCode
-                            val success = viewModel.pairWithCode(pairingCode)
-                            handshakeResult = if (success) "QR Scan Handshake Verified!" else "Scan failed"
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth(0.85f)
-                            .height(48.dp)
-                            .testTag("simulate_qr_scan_button"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Simulate Quick QR Scan")
                     }
 
                     if (handshakeResult != null) {

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
@@ -134,11 +135,11 @@ fun DeviceStatusHeader(
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
-                                    .background(EmeraldSuccess, CircleShape)
+                                    .background(if (status.isOnline) EmeraldSuccess else AmberWarning, CircleShape)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Online • Code: $pairingCode",
+                                text = if (status.isOnline) "Connected • Code: $pairingCode" else "Waiting for Child • Code: $pairingCode",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -156,19 +157,28 @@ fun DeviceStatusHeader(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (status.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
-                            contentDescription = "Battery",
-                            tint = if (status.batteryLevel < 20) CoralLock else EmeraldSuccess,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "${status.batteryLevel}%",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (status.batteryLevel >= 0) {
+                            Icon(
+                                imageVector = if (status.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
+                                contentDescription = "Battery",
+                                tint = if (status.batteryLevel < 20) CoralLock else EmeraldSuccess,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "${status.batteryLevel}%",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        } else {
+                            Text(
+                                text = if (status.isOnline) "Online" else "Offline",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                color = if (status.isOnline) EmeraldSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -182,22 +192,49 @@ fun DeviceStatusHeader(
             ) {
                 TelemetryPill(
                     title = "Screen",
-                    value = if (status.isLocked) "Paused" else "Active",
+                    value = if (!status.isOnline) "Waiting" else if (status.isLocked) "Paused" else "Active",
                     isAlert = status.isLocked,
                     modifier = Modifier.weight(1f)
                 )
                 TelemetryPill(
                     title = "Volume",
-                    value = "${status.volumeMedia}%",
+                    value = if (status.volumeMedia >= 0) "${status.volumeMedia}%" else "--",
                     isAlert = false,
                     modifier = Modifier.weight(1f)
                 )
                 TelemetryPill(
                     title = "Brightness",
-                    value = "${status.brightness}%",
+                    value = if (status.brightness >= 0) "${status.brightness}%" else "--",
                     isAlert = false,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            if (!status.isOnline) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth().clickable { onPairingClick() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode,
+                            contentDescription = null,
+                            tint = ElectricBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Tap to show QR code or share code $pairingCode with child device",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
             }
         }
     }

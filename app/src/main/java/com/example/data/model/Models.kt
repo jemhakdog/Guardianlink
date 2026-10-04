@@ -2,7 +2,8 @@ package com.example.data.model
 
 enum class DeviceRole {
     PARENT,
-    CHILD
+    CHILD,
+    STANDALONE_LOCK
 }
 
 enum class CommandType {
@@ -34,30 +35,32 @@ data class RemoteCommand(
 )
 
 data class DeviceStatus(
-    val deviceId: String = "child_dev_1",
-    val deviceName: String = "Child Device",
-    val modelName: String = "Android Device",
-    val batteryLevel: Int = 84,
+    val deviceId: String = "",
+    val deviceName: String = "Waiting for Child Device",
+    val modelName: String = "No device paired",
+    val batteryLevel: Int = -1, // -1 means no telemetry yet
     val isCharging: Boolean = false,
-    val volumeMedia: Int = 45, // percentage 0-100
-    val volumeRing: Int = 60,
-    val volumeNotification: Int = 50,
-    val brightness: Int = 65, // percentage 0-100
+    val volumeMedia: Int = -1, // -1 means unmeasured
+    val volumeRing: Int = -1,
+    val volumeNotification: Int = -1,
+    val brightness: Int = -1, // -1 means unmeasured
     val isLocked: Boolean = false,
     val lockMessage: String = "Screen time paused by Parent",
     val lockRemainingMinutes: Int = 0,
-    val isOnline: Boolean = true,
-    val lastPingTimestamp: Long = System.currentTimeMillis(),
+    val isOnline: Boolean = false,
+    val lastPingTimestamp: Long = 0L,
     val hasAudioPermission: Boolean = true,
     val hasWriteSettingsPermission: Boolean = false,
     val hasOverlayPermission: Boolean = true,
 
     // Time Limit Governance
-    val timeLimitMinutes: Int = 60,
-    val timeRemainingMinutes: Int = 45,
-    val timeUsedMinutes: Int = 15,
+    val timeLimitMinutes: Int = 120,
+    val timeRemainingMinutes: Int = 0,
+    val timeUsedMinutes: Int = 0,
     val isTimeLimitEnabled: Boolean = true,
     val isTimeExpired: Boolean = false,
     val pendingTimeRequestMinutes: Int = 0,
     val pendingTimeRequestReason: String = ""
-)
+) {
+    val hasRealTelemetry: Boolean get() = isOnline && batteryLevel >= 0
+}

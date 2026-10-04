@@ -103,16 +103,31 @@ class ExampleUnitTest {
 
     @Test
     fun deviceStatus_defaultState_hasValidAttributes() {
-        val status = DeviceStatus()
+        val unlinkedStatus = DeviceStatus()
 
-        assertTrue(status.isOnline)
-        assertFalse(status.isLocked)
-        assertTrue(status.batteryLevel in 0..100)
-        assertTrue(status.volumeMedia in 0..100)
-        assertTrue(status.brightness in 0..100)
-        assertEquals(60, status.timeLimitMinutes)
-        assertEquals(45, status.timeRemainingMinutes)
-        assertFalse(status.isTimeExpired)
+        // Unlinked state correctly reflects waiting for real child device
+        assertFalse(unlinkedStatus.isOnline)
+        assertFalse(unlinkedStatus.isLocked)
+        assertEquals(-1, unlinkedStatus.batteryLevel)
+        assertFalse(unlinkedStatus.hasRealTelemetry)
+
+        // Active child telemetry state
+        val activeTelemetryStatus = DeviceStatus(
+            isOnline = true,
+            batteryLevel = 85,
+            volumeMedia = 50,
+            brightness = 70,
+            timeLimitMinutes = 120,
+            timeRemainingMinutes = 90
+        )
+        assertTrue(activeTelemetryStatus.isOnline)
+        assertTrue(activeTelemetryStatus.hasRealTelemetry)
+        assertTrue(activeTelemetryStatus.batteryLevel in 0..100)
+        assertTrue(activeTelemetryStatus.volumeMedia in 0..100)
+        assertTrue(activeTelemetryStatus.brightness in 0..100)
+        assertEquals(120, activeTelemetryStatus.timeLimitMinutes)
+        assertEquals(90, activeTelemetryStatus.timeRemainingMinutes)
+        assertFalse(activeTelemetryStatus.isTimeExpired)
     }
 
     @Test

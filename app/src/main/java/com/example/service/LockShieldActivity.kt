@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -75,6 +76,9 @@ class LockShieldActivity : ComponentActivity() {
         const val EXTRA_MESSAGE = "extra_lock_message"
         const val EXTRA_MINUTES = "extra_lock_minutes"
         const val ACTION_DISMISS_LOCK = "com.example.action.DISMISS_LOCK"
+
+        @Volatile
+        var isLockShieldVisible: Boolean = false
     }
 
     private val dismissReceiver = object : BroadcastReceiver() {
@@ -88,15 +92,14 @@ class LockShieldActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
         }
 
         val filter = IntentFilter(ACTION_DISMISS_LOCK)
@@ -129,7 +132,28 @@ class LockShieldActivity : ComponentActivity() {
                             )
                         )
                     },
-                    onUnlockSuccess = { finish() },
+                    onUnlockSuccess = { extraMinutes ->
+                        if (extraMinutes > 0) {
+                            val currentRemaining = prefs.getTimeRemainingSeconds()
+                            val newRemaining = maxOf(extraMinutes * 60, currentRemaining + (extraMinutes * 60))
+                            prefs.setTimeRemainingSeconds(newRemaining)
+                            relayManager.executeCommandLocally(
+                                RemoteCommand(
+                                    pairingCode = prefs.getPairingCode(),
+                                    commandType = CommandType.ADD_EXTRA_TIME,
+                                    valueInt = extraMinutes
+                                )
+                            )
+                        } else {
+                            relayManager.executeCommandLocally(
+                                RemoteCommand(
+                                    pairingCode = prefs.getPairingCode(),
+                                    commandType = CommandType.RESET_TIME
+                                )
+                            )
+                        }
+                        finish()
+                    },
                     onCallEmergency = { phone ->
                         try {
                             val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
@@ -141,8 +165,53 @@ class LockShieldActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        isLockShieldVisible = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isLockShieldVisible = false
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        isLockShieldVisible = true
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // Intentionally empty: lock screen cannot be dismissed via back button
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return true // Consume back key so activity never exits, pauses, or cycles on back
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val prefs = PreferencesManager(this)
+        val relayManager = RelayManager.getInstance(this)
+        if (relayManager.deviceStatus.value.isLocked || prefs.getTimeRemainingSeconds() <= 0) {
+            val intent = Intent(this, LockShieldActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+            startActivity(intent)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        isLockShieldVisible = false
         try {
             unregisterReceiver(dismissReceiver)
         } catch (_: Exception) {}
@@ -156,7 +225,7 @@ fun LockShieldScreen(
     emergencyPhone: String,
     parentPin: String,
     onRequestMoreTime: (Int, String) -> Unit,
-    onUnlockSuccess: () -> Unit,
+    onUnlockSuccess: (Int) -> Unit,
     onCallEmergency: (String) -> Unit
 ) {
     // Intercept back button to prevent escaping the lock
@@ -166,6 +235,7 @@ fun LockShieldScreen(
     var showPinDialog by remember { mutableStateOf(false) }
     var pinInput by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf(false) }
+    var pinVerified by remember { mutableStateOf(false) }
 
     var showRequestDialog by remember { mutableStateOf(false) }
     var requestedMinutes by remember { mutableIntStateOf(15) }
@@ -176,7 +246,7 @@ fun LockShieldScreen(
             delay(1000L)
             remainingSeconds -= 1
             if (remainingSeconds == 0) {
-                onUnlockSuccess()
+                onUnlockSuccess(0)
             }
         }
     }
@@ -468,14 +538,15 @@ fun LockShieldScreen(
                         Button(
                             onClick = {
                                 if (pinInput == parentPin) {
-                                    onUnlockSuccess()
+                                    pinVerified = true
+                                    pinError = false
                                 } else {
                                     pinError = true
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                         ) {
-                            Text("Unlock")
+                            Text("Verify")
                         }
                     }
 
@@ -486,6 +557,54 @@ fun LockShieldScreen(
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 4.dp)
                         )
+                    }
+
+                    if (pinVerified) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Passcode Verified! Select unlock option:",
+                            color = Color(0xFF10B981),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = { onUnlockSuccess(15) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                            ) {
+                                Text("+15m", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { onUnlockSuccess(30) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                            ) {
+                                Text("+30m", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { onUnlockSuccess(60) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                            ) {
+                                Text("+1h", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { onUnlockSuccess(0) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                            ) {
+                                Text("All Day", fontSize = 10.sp)
+                            }
+                        }
                     }
                 }
             }

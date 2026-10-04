@@ -31,17 +31,25 @@ class ChildGuardianService : Service() {
         const val NOTIFICATION_ID = 1001
 
         fun start(context: Context) {
-            val intent = Intent(context, ChildGuardianService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, ChildGuardianService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChildGuardianService", "Cannot start foreground service: ${e.message}")
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, ChildGuardianService::class.java)
-            context.stopService(intent)
+            try {
+                val intent = Intent(context, ChildGuardianService::class.java)
+                context.stopService(intent)
+            } catch (e: Exception) {
+                android.util.Log.e("ChildGuardianService", "Cannot stop foreground service: ${e.message}")
+            }
         }
     }
 
@@ -50,15 +58,26 @@ class ChildGuardianService : Service() {
         relayManager = RelayManager.getInstance(this)
         createNotificationChannel()
 
-        val notification = createNotification("GuardianLink active. Connected to parent controller.")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
+        val role = relayManager.prefs.getCurrentRole()
+        val notifText = if (role == com.example.data.model.DeviceRole.STANDALONE_LOCK) {
+            "On-Device Screen Limit: ${relayManager.prefs.getTimeRemainingSeconds() / 60}m remaining today"
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            "GuardianLink active. Connected to parent controller."
+        }
+
+        val notification = createNotification(notifText)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ChildGuardianService", "startForeground failed gracefully: ${e.message}")
         }
 
         // Listen for incoming commands

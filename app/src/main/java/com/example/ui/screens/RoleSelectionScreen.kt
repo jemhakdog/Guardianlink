@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EscalatorWarning
 import androidx.compose.material.icons.filled.FamilyRestroom
+import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Smartphone
@@ -103,24 +104,104 @@ fun RoleSelectionScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // Role Card 1: Parent
+            // Featured Card: On-Device Standalone Lock (No Remote Needed)
+            Card(
+                onClick = { onSelectRole(DeviceRole.STANDALONE_LOCK) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("role_standalone_button"),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(2.dp, ElectricBlue)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(ElectricBlue)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "STANDALONE • NO REMOTE NEEDED",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+
+                        Text(
+                            text = "2 Hours Daily Limit",
+                            color = ElectricBlue,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .background(ElectricBlue.copy(alpha = 0.15f), RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HourglassBottom,
+                                contentDescription = "On-Device Screen Limit",
+                                tint = ElectricBlue,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "On-Device Screen Limit & Lock",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Install directly on this device. Set a 2-hour daily allowance. Phone locks when time is up until a parent enters their passcode.",
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Role Card 1: Remote Parent
             RoleSelectionCard(
-                title = "Parent Device (Controller)",
-                description = "Slide volume bars, adjust screen brightness, trigger instant screen pause locks, and manage bedtime schedules remotely.",
+                title = "Remote Parent Phone",
+                description = "Slide volume bars, adjust brightness, and trigger locks remotely on another phone via Wi-Fi Direct or Cloud.",
                 icon = Icons.Default.FamilyRestroom,
-                badgeColor = ElectricBlue,
+                badgeColor = Color(0xFF6366F1),
                 tag = "role_parent_button",
                 onClick = { onSelectRole(DeviceRole.PARENT) }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Role Card 2: Child
+            // Role Card 2: Remote Child
             RoleSelectionCard(
-                title = "Child Device (Target)",
-                description = "Receives remote adjustments silently. Active apps are preserved safely in background during pauses. Emergency calls always permitted.",
+                title = "Child Device (Paired Remote)",
+                description = "Receives remote adjustments from another parent phone silently. Emergency calls always permitted.",
                 icon = Icons.Default.Smartphone,
                 badgeColor = CyanAccent,
                 tag = "role_child_button",

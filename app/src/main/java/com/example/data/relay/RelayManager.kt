@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import com.example.service.LockShieldActivity
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -38,29 +39,50 @@ class RelayManager private constructor(private val context: Context) {
     val lanClient = LanRelayClient()
     val cloudClient = CloudRelayClient()
 
+    private var cloudCommandJob: kotlinx.coroutines.Job? = null
+    private var cloudStatusJob: kotlinx.coroutines.Job? = null
+
+    // Helper to get initial status based on role
+    private fun getInitialStatus(): DeviceStatus {
+        val role = prefs.getCurrentRole()
+        return if (role == DeviceRole.PARENT) {
+            DeviceStatus(
+                deviceId = "",
+                deviceName = "Waiting for Child Device",
+                modelName = "No device paired",
+                batteryLevel = -1,
+                volumeMedia = -1,
+                volumeRing = -1,
+                volumeNotification = -1,
+                brightness = -1,
+                isOnline = false
+            )
+        } else {
+            val (bat, charging) = nativeController.getBatteryInfo()
+            DeviceStatus(
+                deviceId = "child_dev_1",
+                deviceName = prefs.getChildName(),
+                batteryLevel = bat,
+                isCharging = charging,
+                volumeMedia = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_MUSIC),
+                volumeRing = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_RING),
+                volumeNotification = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_NOTIFICATION),
+                brightness = nativeController.getSystemBrightnessPercentage(),
+                isLocked = false,
+                isOnline = true,
+                hasWriteSettingsPermission = nativeController.canWriteSystemSettings(),
+                hasOverlayPermission = nativeController.canDrawOverlays(),
+                timeLimitMinutes = prefs.getTimeLimitMinutes(),
+                timeRemainingMinutes = ceil(prefs.getTimeRemainingSeconds() / 60.0).toInt(),
+                timeUsedMinutes = max(0, prefs.getTimeLimitMinutes() - ceil(prefs.getTimeRemainingSeconds() / 60.0).toInt()),
+                isTimeLimitEnabled = prefs.isTimeLimitEnabled(),
+                isTimeExpired = prefs.getTimeRemainingSeconds() <= 0
+            )
+        }
+    }
+
     // Current child device status (as observed by Parent, or as reported by Child)
-    private val _deviceStatus = MutableStateFlow(
-        DeviceStatus(
-            deviceId = "child_dev_1",
-            deviceName = prefs.getChildName(),
-            batteryLevel = nativeController.getBatteryInfo().first,
-            isCharging = nativeController.getBatteryInfo().second,
-            volumeMedia = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_MUSIC),
-            volumeRing = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_RING),
-            volumeNotification = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_NOTIFICATION),
-            brightness = nativeController.getSystemBrightnessPercentage(),
-            isLocked = false,
-            isOnline = true,
-            hasAudioPermission = true,
-            hasWriteSettingsPermission = nativeController.canWriteSystemSettings(),
-            hasOverlayPermission = nativeController.canDrawOverlays(),
-            timeLimitMinutes = prefs.getTimeLimitMinutes(),
-            timeRemainingMinutes = ceil(prefs.getTimeRemainingSeconds() / 60.0).toInt(),
-            timeUsedMinutes = max(0, prefs.getTimeLimitMinutes() - ceil(prefs.getTimeRemainingSeconds() / 60.0).toInt()),
-            isTimeLimitEnabled = prefs.isTimeLimitEnabled(),
-            isTimeExpired = prefs.getTimeRemainingSeconds() <= 0
-        )
-    )
+    private val _deviceStatus = MutableStateFlow(getInitialStatus())
     val deviceStatus: StateFlow<DeviceStatus> = _deviceStatus.asStateFlow()
 
     // Shared flow of commands received by Child device
@@ -68,7 +90,7 @@ class RelayManager private constructor(private val context: Context) {
     val incomingCommands: SharedFlow<RemoteCommand> = _incomingCommands.asSharedFlow()
 
     // Connection state
-    private val _isRelayConnected = MutableStateFlow(true)
+    private val _isRelayConnected = MutableStateFlow(false)
     val isRelayConnected: StateFlow<Boolean> = _isRelayConnected.asStateFlow()
 
     private val _pairingHandshakeSuccess = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
@@ -78,8 +100,36 @@ class RelayManager private constructor(private val context: Context) {
         // Start background heartbeat loop & screen time countdown
         startHeartbeatLoop()
         startTimeCountdownLoop()
+        setupCloudStreams()
         if (prefs.getCurrentRole() == DeviceRole.CHILD) {
             lanServer.start()
+        }
+    }
+
+    fun setupCloudStreams() {
+        cloudCommandJob?.cancel()
+        cloudStatusJob?.cancel()
+
+        val role = prefs.getCurrentRole()
+        val pairingCode = prefs.getPairingCode()
+        val cloudUrl = prefs.getCloudRelayUrl()
+
+        if (role == DeviceRole.CHILD) {
+            cloudCommandJob = cloudClient.startCommandStream(scope, cloudUrl, pairingCode) { command ->
+                executeCommandLocally(command)
+            }
+            scope.launch {
+                delay(500)
+                cloudClient.publishStatus(cloudUrl, pairingCode, _deviceStatus.value)
+            }
+        } else if (role == DeviceRole.PARENT) {
+            cloudStatusJob = cloudClient.startStatusStream(scope, cloudUrl, pairingCode) { status ->
+                _deviceStatus.value = status.copy(
+                    isOnline = true,
+                    lastPingTimestamp = System.currentTimeMillis()
+                )
+                _isRelayConnected.value = true
+            }
         }
     }
 
@@ -87,71 +137,107 @@ class RelayManager private constructor(private val context: Context) {
         scope.launch {
             while (true) {
                 try {
-                    // Update telemetry
-                    val (bat, charging) = nativeController.getBatteryInfo()
-                    val mediaVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_MUSIC)
-                    val ringVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_RING)
-                    val notifVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_NOTIFICATION)
-                    val bright = nativeController.getSystemBrightnessPercentage()
+                    val role = prefs.getCurrentRole()
+                    val cloudUrl = prefs.getCloudRelayUrl()
+                    val pairingCode = prefs.getPairingCode()
 
-                    _deviceStatus.value = _deviceStatus.value.copy(
-                        batteryLevel = bat,
-                        isCharging = charging,
-                        volumeMedia = mediaVol,
-                        volumeRing = ringVol,
-                        volumeNotification = notifVol,
-                        brightness = bright,
-                        lastPingTimestamp = System.currentTimeMillis(),
-                        isOnline = true,
-                        hasWriteSettingsPermission = nativeController.canWriteSystemSettings(),
-                        hasOverlayPermission = nativeController.canDrawOverlays()
-                    )
+                    if (role == DeviceRole.CHILD || role == DeviceRole.STANDALONE_LOCK) {
+                        val (bat, charging) = nativeController.getBatteryInfo()
+                        val mediaVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_MUSIC)
+                        val ringVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_RING)
+                        val notifVol = nativeController.getStreamVolumePercentage(android.media.AudioManager.STREAM_NOTIFICATION)
+                        val bright = nativeController.getSystemBrightnessPercentage()
 
-                    // Also sync to Room database
-                    val current = _deviceStatus.value
-                    database.deviceDao().insertOrUpdateDevice(
-                        DeviceEntity(
-                            deviceId = current.deviceId,
-                            deviceName = current.deviceName,
-                            role = DeviceRole.CHILD.name,
-                            pairingCode = prefs.getPairingCode(),
-                            isConnected = true,
-                            batteryLevel = current.batteryLevel,
-                            isCharging = current.isCharging,
-                            volumeMedia = current.volumeMedia,
-                            volumeRing = current.volumeRing,
-                            volumeNotification = current.volumeNotification,
-                            brightness = current.brightness,
-                            isLocked = current.isLocked,
-                            lockMessage = current.lockMessage,
-                            lastSeenTimestamp = System.currentTimeMillis(),
-                            timeLimitMinutes = current.timeLimitMinutes,
-                            timeRemainingMinutes = current.timeRemainingMinutes,
-                            isTimeLimitEnabled = current.isTimeLimitEnabled
+                        _deviceStatus.value = _deviceStatus.value.copy(
+                            batteryLevel = bat,
+                            isCharging = charging,
+                            volumeMedia = mediaVol,
+                            volumeRing = ringVol,
+                            volumeNotification = notifVol,
+                            brightness = bright,
+                            lastPingTimestamp = System.currentTimeMillis(),
+                            isOnline = true,
+                            hasWriteSettingsPermission = nativeController.canWriteSystemSettings(),
+                            hasOverlayPermission = nativeController.canDrawOverlays()
                         )
-                    )
+
+                        if (role == DeviceRole.CHILD) {
+                            cloudClient.publishStatus(cloudUrl, pairingCode, _deviceStatus.value)
+                        }
+                    } else if (role == DeviceRole.PARENT) {
+                        val lastPing = _deviceStatus.value.lastPingTimestamp
+                        if (lastPing > 0L && (System.currentTimeMillis() - lastPing > 20_000L)) {
+                            _deviceStatus.value = _deviceStatus.value.copy(isOnline = false)
+                            _isRelayConnected.value = false
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e("RelayManager", "Heartbeat error: ${e.message}")
                 }
-                delay(15_000L) // 15 seconds ping
+                delay(4000L) // 4 seconds telemetry heartbeat
             }
         }
     }
 
     /**
-     * Active real-time countdown tracking screen time limit
+     * Active real-time countdown tracking screen time limit and continuous lock enforcement
      */
     private fun startTimeCountdownLoop() {
         scope.launch {
             while (true) {
                 try {
                     val current = _deviceStatus.value
-                    if (current.isTimeLimitEnabled && !current.isLocked) {
-                        var remainingSec = prefs.getTimeRemainingSeconds()
+                    val remainingSec = prefs.getTimeRemainingSeconds()
+                    val isExpired = current.isTimeLimitEnabled && remainingSec <= 0
+
+                    // Check bedtime schedule
+                    var isBedtimeNow = false
+                    if (prefs.isBedtimeEnabled()) {
+                        val cal = java.util.Calendar.getInstance()
+                        val currentHour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+                        val currentMin = cal.get(java.util.Calendar.MINUTE)
+                        val nowMinutes = currentHour * 60 + currentMin
+                        val startMinutes = prefs.getBedtimeStartHour() * 60 + prefs.getBedtimeStartMinute()
+                        val endMinutes = prefs.getBedtimeEndHour() * 60 + prefs.getBedtimeEndMinute()
+
+                        isBedtimeNow = if (startMinutes > endMinutes) {
+                            nowMinutes >= startMinutes || nowMinutes < endMinutes
+                        } else {
+                            nowMinutes in startMinutes..endMinutes
+                        }
+                    }
+
+                    val shouldBeLocked = current.isLocked || isExpired || isBedtimeNow
+
+                    if (shouldBeLocked) {
+                        val lockReason = when {
+                            isBedtimeNow -> "Bedtime curfew active! Device paused until morning."
+                            isExpired -> "Daily screen time limit reached! Hand device to parent to unlock with PIN."
+                            current.lockMessage.isNotBlank() -> current.lockMessage
+                            else -> "Screen time paused by Parent"
+                        }
+
+                        if (!current.isLocked || current.lockMessage != lockReason) {
+                            _deviceStatus.value = _deviceStatus.value.copy(
+                                isLocked = true,
+                                isTimeExpired = isExpired,
+                                lockMessage = lockReason,
+                                timeRemainingMinutes = if (isExpired) 0 else current.timeRemainingMinutes
+                            )
+                        }
+
+                        // Re-trigger lock shield only when child navigated away or minimized it
+                        if (!LockShieldActivity.isLockShieldVisible) {
+                            launch(Dispatchers.Main) {
+                                nativeController.triggerLockShield(lockReason, 0)
+                            }
+                        }
+                    } else if (current.isTimeLimitEnabled) {
+                        // Count down active screen seconds
                         if (remainingSec > 0) {
-                            remainingSec -= 1
-                            prefs.setTimeRemainingSeconds(remainingSec)
-                            val remainingMins = ceil(remainingSec / 60.0).toInt()
+                            val newRemainingSec = remainingSec - 1
+                            prefs.setTimeRemainingSeconds(newRemainingSec)
+                            val remainingMins = ceil(newRemainingSec / 60.0).toInt()
                             val usedMins = max(0, current.timeLimitMinutes - remainingMins)
 
                             _deviceStatus.value = current.copy(
@@ -160,37 +246,17 @@ class RelayManager private constructor(private val context: Context) {
                                 isTimeExpired = false
                             )
 
-                            // Check if time just expired!
-                            if (remainingSec <= 0) {
-                                val expiredMsg = "Time limit expired! All other apps locked by Guardian. Ask parent to add more time."
-                                _deviceStatus.value = _deviceStatus.value.copy(
-                                    isTimeExpired = true,
-                                    isLocked = true,
-                                    lockMessage = expiredMsg,
-                                    timeRemainingMinutes = 0
-                                )
-
+                            if (newRemainingSec <= 0) {
                                 launch(Dispatchers.Main) {
-                                    nativeController.triggerLockShield(expiredMsg, 0)
                                     nativeController.playAttentionChime()
                                 }
-
-                                database.commandLogDao().insertLog(
-                                    CommandLogEntity(
-                                        commandType = CommandType.END_TIME_AND_LOCK.name,
-                                        description = "Screen time limit expired. Device locked.",
-                                        valueInt = 0,
-                                        valueString = expiredMsg,
-                                        isSuccess = true
-                                    )
-                                )
                             }
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("RelayManager", "Time countdown error: ${e.message}")
                 }
-                delay(1000L) // 1 second tick
+                delay(1500L) // 1.5 second tick
             }
         }
     }
@@ -243,14 +309,15 @@ class RelayManager private constructor(private val context: Context) {
                 lanClient.sendCommand(targetIp, NetworkUtils.DEFAULT_PORT, command)
             }
 
-            if (mode == "ONLINE" || mode == "HYBRID") {
-                val cloudUrl = prefs.getCloudRelayUrl()
-                val channelKey = prefs.getPairingCode()
-                cloudClient.publishCommand(cloudUrl, channelKey, command)
-            }
+            // Dispatch over Cloud Relay (supports cross-LAN / worldwide like Philippines ↔ Japan!)
+            val cloudUrl = prefs.getCloudRelayUrl()
+            val channelKey = prefs.getPairingCode()
+            cloudClient.publishCommand(cloudUrl, channelKey, command)
 
-            // Execute locally on native system / sandbox
-            executeCommandLocally(command)
+            // Only execute directly on hardware if in Standalone mode
+            if (prefs.getCurrentRole() == DeviceRole.STANDALONE_LOCK) {
+                executeCommandLocally(command)
+            }
         }
     }
 
@@ -413,47 +480,36 @@ class RelayManager private constructor(private val context: Context) {
                     )
                 }
             }
+
+            // If child device: immediately broadcast updated telemetry to cloud so parent sees changes
+            if (prefs.getCurrentRole() == DeviceRole.CHILD) {
+                cloudClient.publishStatus(prefs.getCloudRelayUrl(), prefs.getPairingCode(), _deviceStatus.value)
+            }
         }
     }
 
     /**
-     * Simulates pairing handshake between Parent and Child
+     * Executes pairing handshake between Parent and Child
      */
     fun performPairingHandshake(code: String): Boolean {
         val currentCode = prefs.getPairingCode()
         val isValid = code.trim().equals(currentCode.trim(), ignoreCase = true) ||
                       code.trim().replace("-", "").equals(currentCode.replace("-", ""), ignoreCase = true) ||
-                      code.length >= 4 // Allow user testing codes
+                      code.length >= 4
         if (isValid) {
-            prefs.setPairingCode(code.trim().uppercase())
+            val cleanCode = code.trim().uppercase()
+            prefs.setPairingCode(cleanCode)
             _isRelayConnected.value = true
+            setupCloudStreams()
             scope.launch {
                 _pairingHandshakeSuccess.emit(true)
-                // Add default child device
-                database.deviceDao().insertOrUpdateDevice(
-                    DeviceEntity(
-                        deviceId = "child_dev_1",
-                        deviceName = prefs.getChildName(),
-                        role = DeviceRole.CHILD.name,
-                        pairingCode = code.trim().uppercase(),
-                        isConnected = true,
-                        batteryLevel = 84,
-                        isCharging = false,
-                        volumeMedia = 45,
-                        volumeRing = 60,
-                        volumeNotification = 50,
-                        brightness = 65,
-                        isLocked = false,
-                        lockMessage = "",
-                        lastSeenTimestamp = System.currentTimeMillis(),
-                        timeLimitMinutes = prefs.getTimeLimitMinutes(),
-                        timeRemainingMinutes = ceil(prefs.getTimeRemainingSeconds() / 60.0).toInt(),
-                        isTimeLimitEnabled = prefs.isTimeLimitEnabled()
-                    )
-                )
+                if (prefs.getCurrentRole() == DeviceRole.CHILD) {
+                    cloudClient.publishStatus(prefs.getCloudRelayUrl(), cleanCode, _deviceStatus.value)
+                }
             }
+            return true
         }
-        return isValid
+        return false
     }
 
     companion object {

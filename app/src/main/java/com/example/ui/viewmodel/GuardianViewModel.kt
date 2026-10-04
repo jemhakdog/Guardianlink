@@ -44,8 +44,20 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     private val _targetDeviceIp = MutableStateFlow(prefs.getTargetDeviceIp())
     val targetDeviceIp: StateFlow<String> = _targetDeviceIp.asStateFlow()
 
+    private val _publicIp = MutableStateFlow<String?>("Detecting...")
+    val publicIp: StateFlow<String?> = _publicIp.asStateFlow()
+
     fun getLocalIpAddress(): String = com.example.data.network.NetworkUtils.getLocalIpAddress()
     fun getNetworkTypeLabel(): String = com.example.data.network.NetworkUtils.getNetworkTypeLabel(getApplication())
+    fun getCloudRelayChannel(): String = com.example.data.network.NetworkUtils.getCloudRelayChannel(_pairingCode.value)
+    fun getInviteLink(): String = com.example.data.network.NetworkUtils.getInviteLink(_pairingCode.value)
+
+    fun resolvePublicIp() {
+        viewModelScope.launch {
+            val ip = com.example.data.network.NetworkUtils.getPublicIpAddress()
+            _publicIp.value = ip ?: "Public IP (Behind Cellular NAT)"
+        }
+    }
 
     fun updateConnectionMode(mode: String) {
         prefs.setConnectionMode(mode)
@@ -87,19 +99,22 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     val uiEvents: SharedFlow<String> = _uiEvents.asSharedFlow()
 
     init {
-        // If configured as Child, start the foreground service
-        if (prefs.getCurrentRole() == DeviceRole.CHILD) {
+        // If configured as Child or Standalone On-Device Lock, start the foreground service
+        val role = prefs.getCurrentRole()
+        if (role == DeviceRole.CHILD || role == DeviceRole.STANDALONE_LOCK) {
             ChildGuardianService.start(getApplication())
         }
+        resolvePublicIp()
     }
 
     fun selectRole(role: DeviceRole) {
         prefs.setRole(role)
         _currentRole.value = role
+        relayManager.setupCloudStreams()
 
-        if (role == DeviceRole.CHILD) {
+        if (role == DeviceRole.CHILD || role == DeviceRole.STANDALONE_LOCK) {
             ChildGuardianService.start(getApplication())
-            postUiEvent("Child protection mode activated")
+            postUiEvent(if (role == DeviceRole.STANDALONE_LOCK) "On-Device Screen Time Limiter Active" else "Child protection mode activated")
         } else {
             ChildGuardianService.stop(getApplication())
             postUiEvent("Parent control center activated")
@@ -332,6 +347,100 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     fun openNotificationPolicySettings() {
         relayManager.nativeController.openNotificationPolicyPermissionScreen()
+    }
+
+    // --- On-Device Parent Lock & Screen Time Limiter APIs ---
+
+    fun getParentPin(): String = prefs.getParentPin()
+
+    fun verifyParentPin(pin: String): Boolean = pin == prefs.getParentPin()
+
+    fun updateParentPin(oldPin: String, newPin: String): Boolean {
+        if (oldPin == prefs.getParentPin() && newPin.length in 4..6) {
+            prefs.setParentPin(newPin)
+            postUiEvent("Parent passcode updated successfully")
+            return true
+        }
+        return false
+    }
+
+    fun isBedtimeEnabled(): Boolean = prefs.isBedtimeEnabled()
+
+    fun setBedtimeEnabled(enabled: Boolean) {
+        prefs.setBedtimeEnabled(enabled)
+        postUiEvent(if (enabled) "Bedtime curfew enabled" else "Bedtime curfew disabled")
+    }
+
+    fun getBedtimeHours(): Pair<Int, Int> = Pair(prefs.getBedtimeStartHour(), prefs.getBedtimeStartMinute())
+    fun getWakeHours(): Pair<Int, Int> = Pair(prefs.getBedtimeEndHour(), prefs.getBedtimeEndMinute())
+
+    fun updateBedtimeSchedule(startH: Int, startM: Int, endH: Int, endM: Int) {
+        prefs.setBedtimeStartHour(startH)
+        prefs.setBedtimeStartMinute(startM)
+        prefs.setBedtimeEndHour(endH)
+        prefs.setBedtimeEndMinute(endM)
+        postUiEvent("Bedtime schedule set: %02d:%02d to %02d:%02d".format(startH, startM, endH, endM))
+    }
+
+    fun getEmergencyContact(): String = prefs.isEmergencyContactConfigured()
+
+    fun updateEmergencyContact(phone: String) {
+        prefs.setEmergencyContact(phone)
+        postUiEvent("Emergency phone updated: $phone")
+    }
+
+    fun lockDeviceImmediately(message: String = "Today's screen time limit reached") {
+        relayManager.executeCommandLocally(
+            RemoteCommand(
+                pairingCode = _pairingCode.value,
+                commandType = CommandType.LOCK_SCREEN,
+                valueInt = 0,
+                valueString = message
+            )
+        )
+        postUiEvent("Device locked with shield")
+    }
+
+    fun unlockDeviceLocally() {
+        relayManager.executeCommandLocally(
+            RemoteCommand(
+                pairingCode = _pairingCode.value,
+                commandType = CommandType.UNLOCK_SCREEN
+            )
+        )
+        postUiEvent("Device unlocked")
+    }
+
+    fun setOnDeviceDailyLimit(minutes: Int) {
+        relayManager.executeCommandLocally(
+            RemoteCommand(
+                pairingCode = _pairingCode.value,
+                commandType = CommandType.SET_TIME_LIMIT,
+                valueInt = minutes
+            )
+        )
+        postUiEvent("Daily screen limit set to $minutes min (${minutes / 60} hrs)")
+    }
+
+    fun addOnDeviceExtraTime(minutes: Int) {
+        relayManager.executeCommandLocally(
+            RemoteCommand(
+                pairingCode = _pairingCode.value,
+                commandType = CommandType.ADD_EXTRA_TIME,
+                valueInt = minutes
+            )
+        )
+        postUiEvent("Added +$minutes min to today's screen time")
+    }
+
+    fun resetOnDeviceTime() {
+        relayManager.executeCommandLocally(
+            RemoteCommand(
+                pairingCode = _pairingCode.value,
+                commandType = CommandType.RESET_TIME
+            )
+        )
+        postUiEvent("Today's screen time reset to full allowance")
     }
 
     private fun postUiEvent(message: String) {

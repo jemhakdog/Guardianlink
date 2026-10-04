@@ -1,6 +1,7 @@
 package com.example.data.relay
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -15,6 +16,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.example.R
+import com.example.service.ChildGuardianService
 import com.example.service.LockShieldActivity
 import kotlin.math.roundToInt
 
@@ -135,12 +139,53 @@ class NativeDeviceController(private val context: Context) {
         val intent = Intent(context, LockShieldActivity::class.java).apply {
             putExtra(LockShieldActivity.EXTRA_MESSAGE, message)
             putExtra(LockShieldActivity.EXTRA_MINUTES, remainingMinutes)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            )
         }
-        context.startActivity(intent)
+
+        // Post High-Priority Full Screen Intent to ensure Android displays over background apps
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                9999,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val fullScreenNotif = NotificationCompat.Builder(context, ChildGuardianService.CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("GuardianLink Screen Lock")
+                .setContentText(message)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(pendingIntent, true)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setAutoCancel(false)
+                .setOngoing(true)
+                .build()
+
+            notificationManager.notify(9999, fullScreenNotif)
+        } catch (e: Exception) {
+            Log.e("NativeDeviceController", "Full screen notification failed: ${e.message}")
+        }
+
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("NativeDeviceController", "Direct activity start failed: ${e.message}")
+        }
     }
 
     fun dismissLockShield() {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(9999)
+        } catch (_: Exception) {}
+
         val intent = Intent(LockShieldActivity.ACTION_DISMISS_LOCK).apply {
             setPackage(context.packageName)
         }
