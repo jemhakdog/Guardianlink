@@ -34,12 +34,16 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
-      - name: Ensure Gradle Wrapper Is Committed & Executable
+      - name: Ensure Gradle Wrapper & Debug Keystore Are Present
         run: |
-          if [ ! -f ./gradlew ] || [ ! -f ./gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "::error::Gradle wrapper (gradlew / gradle-wrapper.jar) is missing from the repository. Commit it instead of generating it here."
-            exit 1
-          fi
+          status=0
+          for f in gradlew gradle/wrapper/gradle-wrapper.jar debug.keystore; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=.github/workflows/blank.yml::'$f' is missing from the repository. Commit it (it is required to build/sign the debug APK on CI)."
+              status=1
+            fi
+          done
+          [ $status -eq 0 ] || exit 1
           chmod +x ./gradlew
 
       - name: Build & Test APK

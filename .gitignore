@@ -1,10 +1,13 @@
 # Android/Gradle build artifacts
-*.keystore
-debug.keystore
+*.jks
 
-# Gradle cache and wrapper jars (usually committed, but if generated or local override needed)
-# Note: gradlew, gradlew.bat, and gradle-wrapper.jar are typically SOURCE files that SHOULD be committed.
-# However, debug.keystore is a secret/local artifact.
+# The debug keystore MUST be committed: CI builds sign the debug APK with it
+# (see signingConfigs.debugConfig in app/build.gradle.kts). It contains no
+# real secrets -- AOSP's standard debug key is public by design.
+!debug.keystore
+
+# Gradle wrapper files (gradlew, gradlew.bat, gradle-wrapper.jar) are source
+# files and MUST stay committed so GitHub Actions can run ./gradlew directly.
 
 # Local configuration file (sdk path, etc)
 local.properties
