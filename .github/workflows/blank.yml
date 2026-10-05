@@ -26,6 +26,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # setup-android@v3 currently invokes `sdkmanager tools`, but the legacy
+      # `tools` package no longer exists and causes CI failures. Use the SDK
+      # already available on the hosted runner.
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -37,6 +41,20 @@ jobs:
             gradle wrapper
           fi
           chmod +x ./gradlew
+
+      - name: Ensure Debug Keystore Exists
+        run: |
+          if [ ! -f ./debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ./debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Build & Test APK
         run: ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
