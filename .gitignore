@@ -1,18 +1,15 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-.env
+# Android/Gradle build artifacts
+*.keystore
 debug.keystore
+
+# Gradle cache and wrapper jars (usually committed, but if generated or local override needed)
+# Note: gradlew, gradlew.bat, and gradle-wrapper.jar are typically SOURCE files that SHOULD be committed.
+# However, debug.keystore is a secret/local artifact.
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# IntelliJ IDEA files
+.idea/
+*.iml
+.gradle/

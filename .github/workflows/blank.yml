@@ -26,20 +26,26 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
-      - name: Ensure Gradle Wrapper Executable
+      - name: Ensure Gradle Wrapper Is Committed & Executable
         run: |
-          if [ ! -f ./gradlew ]; then
-            gradle wrapper
+          if [ ! -f ./gradlew ] || [ ! -f ./gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "::error::Gradle wrapper (gradlew / gradle-wrapper.jar) is missing from the repository. Commit it instead of generating it here."
+            exit 1
           fi
           chmod +x ./gradlew
 
       - name: Build & Test APK
-        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
+        # --max-workers=2 keeps peak memory low enough to avoid the runner's
+        # OOM killer while building/testing (Robolectric spins up a JVM too).
+        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace --max-workers=2
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
